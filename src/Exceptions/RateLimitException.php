@@ -4,8 +4,6 @@ namespace EuroMail\Exceptions;
 
 class RateLimitException extends EuroMailException
 {
-    private ?int $retryAfter;
-
     public function __construct(
         string $message,
         ?int $retryAfter = null,
@@ -15,12 +13,6 @@ class RateLimitException extends EuroMailException
         ?string $requestId = null,
         ?\Throwable $previous = null
     ) {
-        parent::__construct($message, $statusCode, $errorType, $errorCode, $requestId, $previous);
-        $this->retryAfter = $retryAfter;
-    }
-
-    public function getRetryAfter(): ?int
-    {
-        return $this->retryAfter;
+        parent::__construct($message, $statusCode, $errorType, $errorCode, $requestId, $retryAfter, $previous);
     }
 }

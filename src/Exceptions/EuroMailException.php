@@ -10,6 +10,7 @@ class EuroMailException extends \Exception
     protected ?string $errorType;
     protected ?string $errorCode;
     protected ?string $requestId;
+    protected ?int $retryAfter;
 
     public function __construct(
         string $message,
@@ -17,6 +18,7 @@ class EuroMailException extends \Exception
         ?string $errorType = null,
         ?string $errorCode = null,
         ?string $requestId = null,
+        ?int $retryAfter = null,
         ?\Throwable $previous = null
     ) {
         parent::__construct($message, 0, $previous);
@@ -24,6 +26,7 @@ class EuroMailException extends \Exception
         $this->errorType = $errorType;
         $this->errorCode = $errorCode;
         $this->requestId = $requestId;
+        $this->retryAfter = $retryAfter;
     }
 
     public function getStatusCode(): ?int
@@ -44,6 +47,11 @@ class EuroMailException extends \Exception
     public function getRequestId(): ?string
     {
         return $this->requestId;
+    }
+
+    public function getRetryAfter(): ?int
+    {
+        return $this->retryAfter;
     }
 
     public function isRetryable(): bool
@@ -75,9 +83,9 @@ class EuroMailException extends \Exception
         $decoded = json_decode($response->body, true);
         if (is_array($decoded)) {
             $errorBody = isset($decoded['error']) && is_array($decoded['error']) ? $decoded['error'] : $decoded;
-            $errorType = $errorBody['type'] ?? null;
-            $errorCode = $errorBody['code'] ?? null;
-            $message = $errorBody['message'] ?? null;
+            $errorType = self::normalizeScalarField($errorBody['type'] ?? null);
+            $errorCode = self::normalizeScalarField($errorBody['code'] ?? null);
+            $message = self::normalizeMessage($errorBody['message'] ?? null);
         }
 
         if ($message === null || $message === '') {
@@ -106,10 +114,60 @@ class EuroMailException extends \Exception
         }
 
         if ($statusCode >= 500 && $statusCode < 600) {
-            return new ServerException($message, $statusCode, $errorType, $errorCode, $requestId);
+            $retryAfter = self::parseRetryAfter($response->getHeader('retry-after'));
+            return new ServerException($message, $statusCode, $errorType, $errorCode, $requestId, $retryAfter);
         }
 
         return new self($message, $statusCode, $errorType, $errorCode, $requestId);
+    }
+
+    /**
+     * Normalizes an error envelope's "type"/"code" field: strings pass through,
+     * other scalars (int, float, bool) are cast to string, and non-scalars
+     * (arrays, objects) become null rather than raising a TypeError when passed
+     * to the typed constructor parameters below.
+     *
+     * @param mixed $value
+     */
+    private static function normalizeScalarField($value): ?string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_scalar($value)) {
+            return (string) $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalizes an error envelope's "message" field. Strings and other scalars
+     * behave like normalizeScalarField(). An array of messages (as some error
+     * envelopes return for multi-field validation errors) is flattened to
+     * strings and joined with "; " instead of raising a TypeError.
+     *
+     * @param mixed $value
+     */
+    private static function normalizeMessage($value): ?string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_array($value)) {
+            $parts = [];
+            array_walk_recursive($value, static function ($item) use (&$parts): void {
+                if (is_scalar($item)) {
+                    $parts[] = (string) $item;
+                }
+            });
+
+            return $parts === [] ? null : implode('; ', $parts);
+        }
+
+        return self::normalizeScalarField($value);
     }
 
     private static function statusText(int $statusCode): string

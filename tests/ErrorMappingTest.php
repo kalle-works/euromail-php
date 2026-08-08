@@ -146,6 +146,75 @@ final class ErrorMappingTest extends TestCase
         $this->assertNull($exception->getRetryAfter());
     }
 
+    public function testRetryAfterIsParsedOnServerErrorsToo(): void
+    {
+        $response = new Response(503, ['Retry-After' => '45'], '{}');
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertInstanceOf(ServerException::class, $exception);
+        $this->assertSame(45, $exception->getRetryAfter());
+    }
+
+    public function testRetryAfterIsNullOnServerErrorWhenHeaderMissing(): void
+    {
+        $response = new Response(500, [], '{}');
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertInstanceOf(ServerException::class, $exception);
+        $this->assertNull($exception->getRetryAfter());
+    }
+
+    public function testArrayMessageIsFlattenedAndJoinedForValidationErrors(): void
+    {
+        $body = json_encode(['error' => [
+            'type' => 'validation_error',
+            'code' => 'invalid_fields',
+            'message' => ['from must be a valid email address', 'subject must not be empty'],
+        ]]);
+        $response = new Response(422, [], $body);
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertInstanceOf(ValidationException::class, $exception);
+        $this->assertStringContainsString('from must be a valid email address', $exception->getMessage());
+        $this->assertStringContainsString('subject must not be empty', $exception->getMessage());
+    }
+
+    public function testNonStringScalarTypeAndCodeAreCastToString(): void
+    {
+        $body = json_encode(['error' => ['type' => 123, 'code' => 456, 'message' => 'boom']]);
+        $response = new Response(400, [], $body);
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertSame('123', $exception->getErrorType());
+        $this->assertSame('456', $exception->getErrorCode());
+    }
+
+    public function testNonScalarTypeAndCodeBecomeNullInsteadOfTypeError(): void
+    {
+        $body = json_encode(['error' => ['type' => ['nested' => 'array'], 'code' => ['also' => 'array'], 'message' => 'boom']]);
+        $response = new Response(400, [], $body);
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertNull($exception->getErrorType());
+        $this->assertNull($exception->getErrorCode());
+        $this->assertSame('boom', $exception->getMessage());
+    }
+
+    public function testEmptyArrayMessageFallsBackToStatusText(): void
+    {
+        $body = json_encode(['error' => ['message' => []]]);
+        $response = new Response(404, [], $body);
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertSame('Not Found', $exception->getMessage());
+    }
+
     /**
      * @dataProvider retryableMatrixProvider
      */
