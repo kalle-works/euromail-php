@@ -45,17 +45,27 @@ final class StreamTransport implements TransportInterface
         $statusCode = 0;
         $responseHeaders = [];
 
+        // When the stream wrapper follows a redirect, $http_response_header holds
+        // the status line and headers of EVERY hop concatenated in order. Only the
+        // last hop describes the response actually returned here, so find the last
+        // "HTTP/" status line and parse headers from that point on, discarding the
+        // earlier hops' headers (e.g. a redirect's Location header).
         if (isset($http_response_header) && is_array($http_response_header)) {
+            $lastStatusIndex = null;
             foreach ($http_response_header as $index => $line) {
-                if ($index === 0) {
-                    if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $matches)) {
-                        $statusCode = (int) $matches[1];
-                    }
-                    continue;
+                if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $matches)) {
+                    $statusCode = (int) $matches[1];
+                    $lastStatusIndex = $index;
                 }
-                $parts = explode(':', $line, 2);
-                if (count($parts) === 2) {
-                    $responseHeaders[trim($parts[0])] = trim($parts[1]);
+            }
+
+            if ($lastStatusIndex !== null) {
+                $count = count($http_response_header);
+                for ($i = $lastStatusIndex + 1; $i < $count; $i++) {
+                    $parts = explode(':', $http_response_header[$i], 2);
+                    if (count($parts) === 2) {
+                        $responseHeaders[trim($parts[0])] = trim($parts[1]);
+                    }
                 }
             }
         }

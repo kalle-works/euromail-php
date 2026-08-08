@@ -33,10 +33,27 @@ final class CurlTransport implements TransportInterface
             CURLOPT_HTTPHEADER => $headerLines,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HEADER => false,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 20,
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_CONNECTTIMEOUT => $this->timeout,
+            // When a redirect is followed, this callback fires once per hop. A new
+            // "HTTP/" status line marks the start of a new hop's headers, so reset
+            // what has been collected so far and keep only the final hop's headers
+            // (e.g. discard a redirect's Location header).
             CURLOPT_HEADERFUNCTION => static function ($curlHandle, string $headerLine) use (&$responseHeaders): int {
                 $length = strlen($headerLine);
+                $trimmed = trim($headerLine);
+
+                if ($trimmed === '') {
+                    return $length;
+                }
+
+                if (preg_match('#^HTTP/\S+\s+\d+#', $trimmed)) {
+                    $responseHeaders = [];
+                    return $length;
+                }
+
                 $parts = explode(':', $headerLine, 2);
                 if (count($parts) === 2) {
                     $responseHeaders[trim($parts[0])] = trim($parts[1]);
