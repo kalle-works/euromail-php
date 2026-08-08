@@ -9,12 +9,30 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# Inlined from kalle-works/.github semantic-release.yml: that repo is private,
+# and GitHub does not allow a public repository to call reusable workflows
+# hosted in a private one.
 jobs:
   release:
-    uses: kalle-works/.github/.github/workflows/semantic-release.yml@463234565740cc24388873c760ef282a6c19954f # main
-    with:
-      runner: kalle-works-arm64
+    name: Semantic Release
+    runs-on: kalle-works-arm64
     permissions:
       contents: write
       issues: write
       pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install semantic-release
+        run: npm install --no-save --no-audit --no-fund semantic-release@^25 @semantic-release/git@^11 @semantic-release/changelog@^7 @semantic-release/exec@^7 conventional-changelog-conventionalcommits@^10
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
