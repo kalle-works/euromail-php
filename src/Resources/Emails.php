@@ -34,15 +34,18 @@ final class Emails
             );
         }
 
-        $response = $this->client->request('POST', '/v1/emails/batch', $emails);
-        $items = $response['data'] ?? [];
+        $response = $this->client->request('POST', '/v1/emails/batch', ['emails' => $emails]);
 
         $results = [];
-        foreach ($items as $item) {
+        foreach ($response['data'] ?? [] as $item) {
             $results[] = SentEmail::fromArray($item);
         }
 
-        return $results;
+        return [
+            'operation_id' => $response['operation_id'] ?? null,
+            'data' => $results,
+            'errors' => $response['errors'] ?? [],
+        ];
     }
 
     public function get(string $id): EmailDetails

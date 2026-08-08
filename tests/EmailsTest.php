@@ -123,18 +123,46 @@ final class EmailsTest extends TestCase
     {
         $transport = new MockTransport();
         $transport->queueResponse(new Response(202, [], json_encode([
+            'operation_id' => 'op_123',
             'data' => array_fill(0, 500, ['id' => 'em_1', 'to' => ['a@example.com']]),
+            'errors' => [],
         ])));
 
         $client = $this->makeClient($transport);
         $emails = array_fill(0, 500, ['from' => 'x@example.com', 'to' => 'a@example.com']);
 
-        $results = $client->emails->sendBatch($emails);
+        $result = $client->emails->sendBatch($emails);
 
-        $this->assertCount(500, $results);
-        $this->assertContainsOnlyInstancesOf(SentEmail::class, $results);
+        $this->assertCount(500, $result['data']);
+        $this->assertContainsOnlyInstancesOf(SentEmail::class, $result['data']);
         $this->assertSame('POST', $transport->getLastRequest()->method);
         $this->assertSame('https://api.euromail.dev/v1/emails/batch', $transport->getLastRequest()->url);
+    }
+
+    public function testSendBatchWrapsEmailsInEnvelopeAndReturnsPartialFailures(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(202, [], json_encode([
+            'operation_id' => 'op_456',
+            'data' => [['id' => 'em_1', 'to' => ['a@example.com']]],
+            'errors' => [['index' => 1, 'error' => 'Invalid email address']],
+        ])));
+
+        $client = $this->makeClient($transport);
+        $emails = [
+            ['from' => 'x@example.com', 'to' => 'a@example.com'],
+            ['from' => 'x@example.com', 'to' => 'not-an-email'],
+        ];
+
+        $result = $client->emails->sendBatch($emails);
+
+        $body = json_decode($transport->getLastRequest()->body, true);
+        $this->assertSame(['emails'], array_keys($body));
+        $this->assertCount(2, $body['emails']);
+
+        $this->assertSame('op_456', $result['operation_id']);
+        $this->assertCount(1, $result['data']);
+        $this->assertSame([['index' => 1, 'error' => 'Invalid email address']], $result['errors']);
     }
 
     public function testGetUnwrapsIntoEmailDetailsWithEvents(): void
