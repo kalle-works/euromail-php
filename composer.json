@@ -1,0 +1,23 @@
+{
+    "name": "euromail/euromail-php",
+    "description": "Official PHP SDK for the euromail.dev transactional email API",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": ">=7.4",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "EuroMail\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EuroMail\\Tests\\": "tests/"
+        }
+    }
+}
