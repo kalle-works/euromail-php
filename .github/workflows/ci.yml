@@ -6,19 +6,6 @@ on:
   pull_request:
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: kalle-works-arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-
-      - name: Lint PHP syntax
-        run: find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
-
   test:
     name: PHPUnit (PHP ${{ matrix.php-version }})
     runs-on: kalle-works-arm64
@@ -32,6 +19,9 @@ jobs:
         with:
           php-version: ${{ matrix.php-version }}
           coverage: none
+
+      - name: Lint PHP syntax
+        run: find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
