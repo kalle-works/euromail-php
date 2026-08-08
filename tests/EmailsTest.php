@@ -3,7 +3,7 @@
 namespace EuroMail\Tests;
 
 use EuroMail\Client;
-use EuroMail\Exceptions\ValidationException;
+use EuroMail\Exceptions\TransportException;
 use EuroMail\Http\Response;
 use EuroMail\Types\EmailDetails;
 use EuroMail\Types\SentEmail;
@@ -46,6 +46,81 @@ final class EmailsTest extends TestCase
         $this->assertSame('POST', $request->method);
         $this->assertSame('https://api.euromail.dev/v1/emails', $request->url);
         $this->assertSame($params, json_decode($request->body, true));
+    }
+
+    public function testSendAutoGeneratesIdempotencyKeyWhenNotProvided(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(202, [], json_encode(['data' => ['id' => 'em_1']])));
+
+        $client = $this->makeClient($transport);
+        $client->emails->send(['from' => 'x@example.com', 'to' => 'a@example.com']);
+
+        $body = json_decode($transport->getLastRequest()->body, true);
+        $this->assertArrayHasKey('idempotency_key', $body);
+        $this->assertMatchesRegularExpression(
+            '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/',
+            $body['idempotency_key']
+        );
+    }
+
+    public function testSendPreservesCallerProvidedIdempotencyKeyVerbatim(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(202, [], json_encode(['data' => ['id' => 'em_1']])));
+
+        $client = $this->makeClient($transport);
+        $client->emails->send([
+            'from' => 'x@example.com',
+            'to' => 'a@example.com',
+            'idempotency_key' => 'caller-supplied-key',
+        ]);
+
+        $body = json_decode($transport->getLastRequest()->body, true);
+        $this->assertSame('caller-supplied-key', $body['idempotency_key']);
+    }
+
+    public function testSendReusesSameIdempotencyKeyAcrossRetries(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueException(new TransportException('connection reset'));
+        $transport->queueResponse(new Response(202, [], json_encode(['data' => ['id' => 'em_1']])));
+
+        $client = new Client('sk_test', ['transport' => $transport, 'max_retries' => 1]);
+        $client->emails->send(['from' => 'x@example.com', 'to' => 'a@example.com']);
+
+        $this->assertSame(2, $transport->getRequestCount());
+
+        $requests = $transport->getRequests();
+        $firstKey = json_decode($requests[0]->body, true)['idempotency_key'];
+        $secondKey = json_decode($requests[1]->body, true)['idempotency_key'];
+
+        $this->assertSame($firstKey, $secondKey);
+    }
+
+    public function testSendBatchAddsIdempotencyKeyOnlyToItemsMissingOne(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(202, [], json_encode([
+            'operation_id' => 'op_1',
+            'data' => [['id' => 'em_1'], ['id' => 'em_2']],
+            'errors' => [],
+        ])));
+
+        $client = $this->makeClient($transport);
+        $client->emails->sendBatch([
+            ['from' => 'x@example.com', 'to' => 'a@example.com'],
+            ['from' => 'x@example.com', 'to' => 'b@example.com', 'idempotency_key' => 'caller-key'],
+        ]);
+
+        $body = json_decode($transport->getLastRequest()->body, true);
+        $this->assertArrayHasKey('idempotency_key', $body['emails'][0]);
+        $this->assertMatchesRegularExpression(
+            '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/',
+            $body['emails'][0]['idempotency_key']
+        );
+        $this->assertSame('caller-key', $body['emails'][1]['idempotency_key']);
+        $this->assertNotSame($body['emails'][0]['idempotency_key'], $body['emails'][1]['idempotency_key']);
     }
 
     public function testSendUnwrapsDataEnvelopeIntoSentEmail(): void
@@ -102,7 +177,7 @@ final class EmailsTest extends TestCase
         $this->assertSame(['a@example.com', 'b@example.com'], $sentEmail->to);
     }
 
-    public function testSendBatchThrowsValidationExceptionWhenExceeding500Items(): void
+    public function testSendBatchThrowsInvalidArgumentExceptionWhenExceeding500Items(): void
     {
         $transport = new MockTransport();
         $client = $this->makeClient($transport);
@@ -111,9 +186,9 @@ final class EmailsTest extends TestCase
 
         try {
             $client->emails->sendBatch($emails);
-            $this->fail('Expected ValidationException was not thrown.');
-        } catch (ValidationException $exception) {
-            $this->assertSame(422, $exception->getStatusCode());
+            $this->fail('Expected InvalidArgumentException was not thrown.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('500', $exception->getMessage());
         }
 
         $this->assertSame(0, $transport->getRequestCount());

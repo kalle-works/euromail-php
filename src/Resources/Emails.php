@@ -3,7 +3,7 @@
 namespace EuroMail\Resources;
 
 use EuroMail\Client;
-use EuroMail\Exceptions\ValidationException;
+use EuroMail\Idempotency;
 use EuroMail\Types\EmailDetails;
 use EuroMail\Types\SentEmail;
 
@@ -18,6 +18,8 @@ final class Emails
 
     public function send(array $params): SentEmail
     {
+        $params = $this->withIdempotencyKey($params);
+
         $response = $this->client->request('POST', '/v1/emails', $params);
 
         return SentEmail::fromArray($response['data'] ?? []);
@@ -26,13 +28,12 @@ final class Emails
     public function sendBatch(array $emails): array
     {
         if (count($emails) > 500) {
-            throw new ValidationException(
-                'Batch size cannot exceed 500 emails.',
-                422,
-                'validation_error',
-                'batch_too_large'
+            throw new \InvalidArgumentException(
+                'Batch size cannot exceed the server-side limit of 500 emails.'
             );
         }
+
+        $emails = array_map([$this, 'withIdempotencyKey'], $emails);
 
         $response = $this->client->request('POST', '/v1/emails/batch', ['emails' => $emails]);
 
@@ -79,5 +80,18 @@ final class Emails
         $response = $this->client->request('POST', '/v1/emails/' . rawurlencode($id) . '/cancel');
 
         return SentEmail::fromArray($response['data'] ?? []);
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function withIdempotencyKey(array $params): array
+    {
+        if (!isset($params['idempotency_key']) || $params['idempotency_key'] === '') {
+            $params['idempotency_key'] = Idempotency::generate();
+        }
+
+        return $params;
     }
 }
