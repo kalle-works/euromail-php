@@ -90,4 +90,49 @@ final class RetryTest extends TestCase
         $this->assertSame(['status' => 'active'], $result);
         $this->assertSame(2, $transport->getRequestCount());
     }
+
+    public function testRetryAfterIsHonoredOnServerErrorsNotJustRateLimit(): void
+    {
+        $transport = new MockTransport();
+        // retry-after: 3 is deliberately larger than the 1s the exponential
+        // backoff fallback would use for the first attempt, so honoring the
+        // header (vs. ignoring it and falling back to backoff) is observable.
+        $transport->queueResponse(new Response(503, ['Retry-After' => '3'], '{}'));
+        $transport->queueResponse(new Response(200, [], json_encode(['data' => ['status' => 'active']])));
+
+        $client = new Client('sk_test', ['transport' => $transport, 'max_retries' => 1]);
+
+        $start = microtime(true);
+        $result = $client->account->get();
+        $elapsed = microtime(true) - $start;
+
+        $this->assertSame(['status' => 'active'], $result);
+        $this->assertSame(2, $transport->getRequestCount());
+        $this->assertGreaterThanOrEqual(2.9, $elapsed);
+        $this->assertLessThan(4.5, $elapsed);
+    }
+
+    public function testMaxRetryDelayCapsAnOversizedRetryAfterHeader(): void
+    {
+        $transport = new MockTransport();
+        // A retry-after value this large would sleep for hours if honored verbatim.
+        $transport->queueResponse(new Response(503, ['Retry-After' => '9999'], '{}'));
+        $transport->queueResponse(new Response(200, [], json_encode(['data' => ['status' => 'active']])));
+
+        $client = new Client('sk_test', [
+            'transport' => $transport,
+            'max_retries' => 1,
+            'max_retry_delay' => 1,
+        ]);
+
+        $start = microtime(true);
+        $result = $client->account->get();
+        $elapsed = microtime(true) - $start;
+
+        $this->assertSame(['status' => 'active'], $result);
+        $this->assertSame(2, $transport->getRequestCount());
+        // The wait must be bounded by max_retry_delay (1s), not the 9999s header.
+        $this->assertGreaterThanOrEqual(0.9, $elapsed);
+        $this->assertLessThan(3.0, $elapsed);
+    }
 }

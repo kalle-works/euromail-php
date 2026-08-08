@@ -104,6 +104,13 @@ final class ClientTest extends TestCase
         $this->assertSame(0, $this->readPrivateProperty($client, 'maxRetries'));
     }
 
+    public function testMaxRetryDelayDefaultsToThirtySeconds(): void
+    {
+        $client = new Client('sk_test');
+
+        $this->assertSame(30, $this->readPrivateProperty($client, 'maxRetryDelay'));
+    }
+
     public function testResourcesArePubliclyAccessibleAndCorrectlyTyped(): void
     {
         $client = new Client('sk_test', ['transport' => new MockTransport()]);
@@ -111,5 +118,35 @@ final class ClientTest extends TestCase
         $this->assertInstanceOf(Emails::class, $client->emails);
         $this->assertInstanceOf(Account::class, $client->account);
         $this->assertInstanceOf(Domains::class, $client->domains);
+    }
+
+    public function testInvalidTransportOptionThrowsInvalidArgumentException(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new Client('sk_test', ['transport' => new \stdClass()]);
+    }
+
+    public function testInvalidTransportOptionAsStringAlsoThrows(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new Client('sk_test', ['transport' => 'not-a-transport']);
+    }
+
+    public function testRequestBodyThatFailsJsonEncodingThrowsInvalidArgumentExceptionWithoutSendingRequest(): void
+    {
+        $transport = new MockTransport();
+        $client = new Client('sk_test', ['transport' => $transport]);
+
+        try {
+            // "\xC3\x28" is invalid UTF-8, which json_encode() cannot represent.
+            $client->emails->send(['from' => 'x@example.com', 'to' => 'a@example.com', 'subject' => "\xC3\x28"]);
+            $this->fail('Expected InvalidArgumentException was not thrown.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('JSON', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $transport->getRequestCount());
     }
 }
