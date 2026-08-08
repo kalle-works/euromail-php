@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   release:
-    uses: kalle-works/.github/.github/workflows/semantic-release.yml@77524aa234c999f285b1c6d192d62df02ff39bf8 # main
+    uses: kalle-works/.github/.github/workflows/semantic-release.yml@463234565740cc24388873c760ef282a6c19954f # main
     with:
       runner: kalle-works-arm64
     permissions:
