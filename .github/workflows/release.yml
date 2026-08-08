@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: kalle-works/.github/.github/workflows/semantic-release.yml@463234565740cc24388873c760ef282a6c19954f # main
+    with:
+      runner: kalle-works-arm64
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
