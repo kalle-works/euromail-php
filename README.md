@@ -35,13 +35,26 @@ $client = new Client('sk_live_...', [
     'base_url' => 'https://api.euromail.dev', // default
     'timeout' => 15,                          // seconds, default 15
     'max_retries' => 3,                       // default 0 (no retries)
+    'max_retry_delay' => 30,                  // seconds, default 30
 ]);
 ```
 
 When `max_retries` is greater than zero, requests that fail with a `429`, a `5xx`
 status, or a transport-level failure (DNS, TLS, connection timeout) are retried
-automatically. The `retry-after` response header is honored when present;
-otherwise the SDK backs off exponentially (1s, 2s, 4s, ...).
+automatically. The `retry-after` response header is honored when present on
+either a `429` or a `5xx` response; otherwise the SDK backs off exponentially
+(1s, 2s, 4s, ...). Either way, the wait between attempts is capped at
+`max_retry_delay` seconds, so a very large `retry-after` value from the server
+can't stall a request for longer than that.
+
+### Idempotency
+
+`emails->send()` and `emails->sendBatch()` automatically attach an
+`idempotency_key` (a UUIDv4, via `Idempotency::generate()`) to any email that
+doesn't already have one, generated once before the request is sent. If a
+request is retried (per `max_retries` above), every attempt reuses that same
+key, so retrying a timed-out send can't result in a duplicate email. Pass your
+own `idempotency_key` in the params to override it.
 
 ## Error handling
 
@@ -53,8 +66,13 @@ under `EuroMail\Exceptions`, all extending `EuroMailException`:
 - `NotFoundException` — 404
 - `ConflictException` — 409
 - `ValidationException` — 422, or any response with error type `validation_error`
-- `RateLimitException` — 429, exposes `getRetryAfter(): ?int`
+- `RateLimitException` — 429
 - `ServerException` — 5xx
+
+Every `EuroMailException` exposes `getRetryAfter(): ?int`, parsed from the
+`retry-after` response header on both `429` and `5xx` responses (not just
+`RateLimitException`), used internally to size the wait between automatic
+retries.
 
 ```php
 use EuroMail\Exceptions\EuroMailException;
