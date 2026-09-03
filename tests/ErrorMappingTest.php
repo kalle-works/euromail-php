@@ -236,4 +236,49 @@ final class ErrorMappingTest extends TestCase
             'ConflictException (409) is not retryable' => [new ConflictException('conflict', 409), false],
         ];
     }
+
+    /**
+     * Locks the SDK's mapping against the error envelope shape the API
+     * actually emits (crates/euromail-api/src/errors.rs and
+     * crates/euromail-common/src/errors.rs `error.type` values), not just
+     * generic status codes. A malformed-JSON request, for example, is
+     * rejected as 400 with `type: "validation_error"` — not 422 — so a
+     * mapping keyed on status code alone would misclassify it.
+     *
+     * @dataProvider realApiErrorEnvelopeProvider
+     */
+    public function testRealApiErrorEnvelopesMapToTheCorrectExceptionClass(
+        int $statusCode,
+        string $errorType,
+        string $expectedClass
+    ): void {
+        $body = json_encode(['error' => ['type' => $errorType, 'code' => 'CODE', 'message' => 'msg']]);
+        $response = new Response($statusCode, [], $body);
+
+        $exception = EuroMailException::fromResponse($response);
+
+        $this->assertInstanceOf($expectedClass, $exception);
+        $this->assertSame($errorType, $exception->getErrorType());
+    }
+
+    public function realApiErrorEnvelopeProvider(): array
+    {
+        return [
+            // Malformed/invalid request bodies (crates/euromail-api/src/extractors/json.rs)
+            // and domain validation failures (AppError::Validation) both come back as
+            // 400 Bad Request, not 422 — the "type" string is what disambiguates them.
+            '400 validation_error (malformed json body)' => [400, 'validation_error', ValidationException::class],
+            '422 validation_error (ValidatedJson rejection)' => [422, 'validation_error', ValidationException::class],
+            '401 auth_error (AppError::Auth)' => [401, 'auth_error', AuthenticationException::class],
+            '403 forbidden (AppError::Forbidden / ApiError::Forbidden)' => [403, 'forbidden', AuthenticationException::class],
+            '403 permission_error (ApiError::InsufficientScope)' => [403, 'permission_error', AuthenticationException::class],
+            '404 not_found (AppError::NotFound)' => [404, 'not_found', NotFoundException::class],
+            '409 conflict (AppError::Conflict)' => [409, 'conflict', ConflictException::class],
+            '429 rate_limited (ApiError::RateLimited)' => [429, 'rate_limited', RateLimitException::class],
+            '429 quota_exceeded (ApiError::QuotaExceeded)' => [429, 'quota_exceeded', RateLimitException::class],
+            '500 internal_error (AppError::Internal)' => [500, 'internal_error', ServerException::class],
+            '500 database_error (AppError::Database)' => [500, 'database_error', ServerException::class],
+            '503 service_unavailable (ApiError::ServiceUnavailable)' => [503, 'service_unavailable', ServerException::class],
+        ];
+    }
 }

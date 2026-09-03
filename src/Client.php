@@ -6,11 +6,13 @@ use EuroMail\Exceptions\EuroMailException;
 use EuroMail\Exceptions\TransportException;
 use EuroMail\Http\CurlTransport;
 use EuroMail\Http\Request;
+use EuroMail\Http\Response;
 use EuroMail\Http\StreamTransport;
 use EuroMail\Http\TransportInterface;
 use EuroMail\Resources\Account;
 use EuroMail\Resources\Domains;
 use EuroMail\Resources\Emails;
+use EuroMail\Resources\Suppressions;
 
 final class Client
 {
@@ -24,6 +26,7 @@ final class Client
     public Emails $emails;
     public Account $account;
     public Domains $domains;
+    public Suppressions $suppressions;
 
     public function __construct(string $apiKey, array $options = [])
     {
@@ -49,6 +52,7 @@ final class Client
         $this->emails = new Emails($this);
         $this->account = new Account($this);
         $this->domains = new Domains($this);
+        $this->suppressions = new Suppressions($this);
     }
 
     /**
@@ -56,6 +60,26 @@ final class Client
      * @return array<string, mixed>
      */
     public function request(string $method, string $path, ?array $body = null): array
+    {
+        return $this->decodeBody($this->sendRequest($method, $path, $body)->body);
+    }
+
+    /**
+     * Like {@see request()}, but returns the raw response body instead of
+     * JSON-decoding it. Used for endpoints that don't respond with JSON, such
+     * as the suppressions CSV export.
+     *
+     * @param array<string, mixed>|null $body
+     */
+    public function requestRaw(string $method, string $path, ?array $body = null): string
+    {
+        return $this->sendRequest($method, $path, $body)->body;
+    }
+
+    /**
+     * @param array<string, mixed>|null $body
+     */
+    private function sendRequest(string $method, string $path, ?array $body): Response
     {
         $url = $this->baseUrl . $path;
         $headers = [
@@ -91,7 +115,7 @@ final class Client
             }
 
             if ($response->statusCode >= 200 && $response->statusCode < 300) {
-                return $this->decodeBody($response->body);
+                return $response;
             }
 
             $exception = EuroMailException::fromResponse($response);
