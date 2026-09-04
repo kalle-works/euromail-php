@@ -7,12 +7,18 @@ class SentEmail
     public ?string $id;
     public ?string $messageId;
     public ?string $status;
+    /** @var string[] */
     public array $to;
     public bool $sandbox;
     public ?string $scheduledAt;
     public ?string $createdAt;
+    /** @var array<string, mixed> the response record exactly as the API returned it */
     public array $raw;
 
+    /**
+     * @param string[] $to
+     * @param array<string, mixed> $raw
+     */
     public function __construct(
         ?string $id = null,
         ?string $messageId = null,
@@ -33,6 +39,9 @@ class SentEmail
         $this->raw = $raw;
     }
 
+    /**
+     * @param array<string, mixed> $data
+     */
     public static function fromArray(array $data): self
     {
         return new self(
@@ -47,6 +56,10 @@ class SentEmail
         );
     }
 
+    /**
+     * @param mixed $to
+     * @return string[]
+     */
     protected static function normalizeTo($to): array
     {
         if (is_string($to)) {

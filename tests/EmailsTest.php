@@ -344,4 +344,18 @@ final class EmailsTest extends TestCase
         $this->assertSame('POST', $request->method);
         $this->assertSame('https://api.euromail.dev/v1/emails/em_1/cancel', $request->url);
     }
+
+    public function testSendBatchSendsAJsonListEvenWhenGivenAnAssociativeArray(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(202, [], (string) json_encode(['data' => []])));
+        $client = $this->makeClient($transport);
+
+        $client->emails->sendBatch([
+            'welcome' => ['from' => 'a@b.c', 'to' => 'x@y.z', 'subject' => 'Hi', 'idempotency_key' => 'k1'],
+            'reset' => ['from' => 'a@b.c', 'to' => 'x@y.z', 'subject' => 'Reset', 'idempotency_key' => 'k2'],
+        ]);
+
+        $this->assertStringStartsWith('{"emails":[{', $transport->getLastRequest()->body ?? '');
+    }
 }

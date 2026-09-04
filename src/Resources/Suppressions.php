@@ -2,22 +2,14 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Client;
 
-final class Suppressions
+final class Suppressions extends Resource
 {
     /**
      * Mirrors the server-side cap on POST /v1/suppressions/import — enforced
      * here too so an oversized import fails before a network round trip.
      */
     private const MAX_IMPORT_SIZE = 10_000;
-
-    private Client $client;
-
-    public function __construct(Client $client)
-    {
-        $this->client = $client;
-    }
 
     /**
      * Add a single address to the suppression list.
@@ -31,9 +23,7 @@ final class Suppressions
             $body['reason'] = $reason;
         }
 
-        $response = $this->client->request('POST', '/v1/suppressions', $body);
-
-        return $response['data'] ?? [];
+        return $this->unwrap($this->client->request('POST', '/v1/suppressions', $body));
     }
 
     /**
@@ -42,27 +32,28 @@ final class Suppressions
      */
     public function all(array $filters = []): array
     {
-        $query = http_build_query($filters);
-        $path = '/v1/suppressions' . ($query !== '' ? '?' . $query : '');
+        return $this->unwrapPage($this->client->request('GET', $this->path('/v1/suppressions', $filters)));
+    }
 
-        $response = $this->client->request('GET', $path);
-
-        return [
-            'data' => $response['data'] ?? [],
-            'pagination' => $response['pagination'] ?? [],
-        ];
+    /**
+     * @param array<string, mixed> $filters
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function iterate(array $filters = []): \Generator
+    {
+        yield from $this->paginate(fn (array $f): array => $this->all($f), $filters);
     }
 
     public function delete(string $emailAddress): void
     {
-        $this->client->request('DELETE', '/v1/suppressions/' . rawurlencode($emailAddress));
+        $this->client->request('DELETE', '/v1/suppressions/' . $this->segment($emailAddress));
     }
 
     /**
      * Bulk-import addresses onto the suppression list.
      *
      * @param string[] $emails
-     * @return array{inserted: int, total_requested: int, invalid_addresses: string[]}
+     * @return array<string, mixed> `{inserted: int, total_requested: int, invalid_addresses: string[]}`
      */
     public function import(array $emails, ?string $reason = null): array
     {
@@ -81,9 +72,7 @@ final class Suppressions
             $body['reason'] = $reason;
         }
 
-        $response = $this->client->request('POST', '/v1/suppressions/import', $body);
-
-        return $response['data'] ?? [];
+        return $this->unwrap($this->client->request('POST', '/v1/suppressions/import', $body));
     }
 
     /**

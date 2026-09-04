@@ -4,6 +4,11 @@ namespace EuroMail;
 
 final class Attachment
 {
+    /**
+     * Read a file into the shape `emails->send()` expects under `attachments`.
+     *
+     * @return array{filename: string, content_type: string, content: string}
+     */
     public static function fromFile(string $path): array
     {
         if (!is_file($path) || !is_readable($path)) {

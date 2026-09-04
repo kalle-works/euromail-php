@@ -3,6 +3,10 @@
 Official PHP SDK for the [euromail.dev](https://euromail.dev) transactional email API.
 
 Requires PHP 7.4 or newer. Zero runtime dependencies beyond `ext-json`.
+Covers emails, templates, domains, webhooks, suppressions, contact lists,
+newsletters, signup forms, inbound mail and routes, sub-accounts, API keys,
+analytics, audit logs, operations, dead letters and the account itself.
+Not yet wrapped: agent mailboxes, GDPR export/erase, billing and insights.
 
 ## Install
 
@@ -27,6 +31,17 @@ $email = $client->emails->send([
 echo $email->id;
 echo $email->status; // "queued"
 ```
+
+The API key can also come from the `EUROMAIL_API_KEY` environment variable:
+
+```php
+$client = new Client(); // reads EUROMAIL_API_KEY
+```
+
+A missing or blank key throws `InvalidArgumentException` from the
+constructor rather than a 401 on the first request. The key is trimmed, so
+a trailing newline from a secret file is harmless; a key with other control
+characters is rejected. A blank `base_url` means the production API.
 
 ### Client options
 
@@ -56,6 +71,84 @@ request is retried (per `max_retries` above), every attempt reuses that same
 key, so retrying a timed-out send can't result in a duplicate email. Pass your
 own `idempotency_key` in the params to override it.
 
+## Resources
+
+Every resource hangs off the client as a property. Methods return plain
+arrays shaped like the API's JSON (`emails` returns `SentEmail` /
+`EmailDetails` objects), so new fields the API adds are available without an
+SDK update. Path segments are URL-encoded for you.
+
+| Property | Methods |
+| --- | --- |
+| `emails` | `send`, `sendBatch`, `broadcast`, `get`, `all`, `iterate`, `cancel`, `links`, `validate` |
+| `templates` | `create`, `all`, `iterate`, `get`, `update`, `delete` |
+| `domains` | `create`, `all`, `page`, `iterate`, `get`, `verify`, `delete`, `setSendingSubdomain`, `setTrackingDomain`, `verifyTrackingDomain`, `removeTrackingDomain` |
+| `webhooks` | `create`, `all`, `iterate`, `get`, `update`, `test`, `delete` |
+| `suppressions` | `create`, `all`, `iterate`, `delete`, `import`, `export` |
+| `contactLists` | `create`, `all`, `get`, `update`, `delete`, `addContact`, `addContacts`, `contacts`, `iterateContacts`, `removeContact`, `getWelcomeEmail`, `configureWelcomeEmail` |
+| `newsletters` | `create`, `all`, `get`, `update`, `delete`, `send` |
+| `signupForms` | `create`, `all`, `get`, `update`, `delete`, `toggle` |
+| `inbound` | `all`, `iterate`, `get`, `delete` |
+| `inboundRoutes` | `create`, `all`, `iterate`, `get`, `update`, `delete` |
+| `subAccounts` | `create`, `all`, `iterate`, `get`, `update`, `delete`, `analytics`, `createApiKey` |
+| `apiKeys` | `create`, `all`, `delete` |
+| `analytics` | `overview`, `timeseries`, `domains`, `tags`, `aggregate`, `export` |
+| `auditLogs` | `all`, `iterate` |
+| `operations` | `all`, `iterate`, `get` |
+| `deadLetters` | `all`, `retry`, `delete` |
+| `account` | `get`, `export`, `delete` |
+
+```php
+$domain = $client->domains->create('yourdomain.com');
+// publish $domain['dns_records'], then:
+$client->domains->verify($domain['id']);
+
+$template = $client->templates->create([
+    'alias' => 'welcome',
+    'name' => 'Welcome',
+    'subject' => 'Welcome, {{name}}',
+    'html_body' => '<p>Hi {{name}}</p>',
+]);
+
+$webhook = $client->webhooks->create([
+    'url' => 'https://example.com/hooks/euromail',
+    'events' => ['delivered', 'bounced', 'complained'],
+]);
+$webhook['secret']; // shown once; store it for signature verification below
+```
+
+### Pagination
+
+Paginated `all()` methods return one page as `['data' => [...],
+'pagination' => ['page', 'per_page', 'total', 'total_pages']]` and accept
+`page` / `per_page` in their filters. The matching `iterate()` methods walk
+every page and yield items one at a time:
+
+```php
+foreach ($client->emails->iterate(['status' => 'bounced']) as $email) {
+    echo $email->id, PHP_EOL;
+}
+
+foreach ($client->contactLists->iterateContacts($listId) as $contact) {
+    // ...
+}
+```
+
+`domains->all()` returns the bare list of domains, as it did in 1.x;
+`domains->page()` returns the envelope. `newsletters->all()` pages with
+`limit` / `offset` and returns `['data' => [...], 'total' => n]`, mirroring
+that endpoint.
+
+Analytics methods, `domains->create()`, `domains->setTrackingDomain()`,
+`domains->verifyTrackingDomain()`, `newsletters->get()` and
+`emails->validate()` return the full response body, because those endpoints
+carry fields next to `data` (`period`, `warnings`, `cname_target`,
+`tracking_check`, `stats`, `valid`).
+
+`emails->broadcast()` is never retried automatically: the endpoint has no
+idempotency key, so a retry after a timeout could mail the whole list twice.
+Check the returned `operation_id` with `operations->get()` before resending.
+
 ## Error handling
 
 Every non-2xx response and every transport failure is raised as an exception
@@ -68,6 +161,10 @@ under `EuroMail\Exceptions`, all extending `EuroMailException`:
 - `ValidationException` — 422, or any response with error type `validation_error`
 - `RateLimitException` — 429
 - `ServerException` — 5xx
+
+A 2xx response whose body is not a JSON object (an HTML error page from a
+proxy, a truncated response) is raised as a plain `EuroMailException`
+carrying the status code and request id, never returned as an empty result.
 
 Every `EuroMailException` exposes `getRetryAfter(): ?int`, parsed from the
 `retry-after` response header on both `429` and `5xx` responses (not just
@@ -157,6 +254,13 @@ $event = json_decode($payload, true);
 or timestamp outside the tolerance window (default 300 seconds) simply
 returns `false`. During secret rotation the signature header may carry
 multiple `v1=` entries; verification succeeds if any of them match.
+
+## Development
+
+```bash
+composer install
+composer check   # php -l, PHPStan level 8, PHPUnit
+```
 
 ## License
 
