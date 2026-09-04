@@ -48,6 +48,40 @@ final class EmailsTest extends TestCase
         $this->assertSame($params, json_decode($request->body, true));
     }
 
+    /**
+     * `send()` takes a raw associative array with no parameter whitelist, so
+     * send_at/stream/tracking/transactional already work without any SDK
+     * change on this end — this locks that passthrough behavior in, since
+     * it's easy for a future refactor toward typed parameters to silently
+     * drop a field nobody wrote an explicit accessor for.
+     */
+    public function testSendPassesThroughSchedulingAndTrackingParams(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(202, [], json_encode(['data' => ['id' => 'em_1']])));
+
+        $client = $this->makeClient($transport);
+        $params = [
+            'from' => 'sender@example.com',
+            'to' => 'a@example.com',
+            'subject' => 'Hello',
+            'text_body' => 'Hi',
+            'send_at' => '2026-08-01T00:00:00Z',
+            'stream' => 'marketing',
+            'tracking' => true,
+            'transactional' => false,
+            'idempotency_key' => 'idem-scheduling',
+        ];
+
+        $client->emails->send($params);
+
+        $body = json_decode($transport->getLastRequest()->body, true);
+        $this->assertSame('2026-08-01T00:00:00Z', $body['send_at']);
+        $this->assertSame('marketing', $body['stream']);
+        $this->assertTrue($body['tracking']);
+        $this->assertFalse($body['transactional']);
+    }
+
     public function testSendAutoGeneratesIdempotencyKeyWhenNotProvided(): void
     {
         $transport = new MockTransport();
