@@ -7,7 +7,7 @@ Requires PHP 7.4 or newer. Zero runtime dependencies beyond `ext-json`.
 ## Install
 
 ```bash
-composer require euromail/euromail-php
+composer require euromail/euromail
 ```
 
 ## Quickstart
