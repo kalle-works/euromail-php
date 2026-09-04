@@ -1,5 +1,5 @@
 {
-    "name": "euromail/euromail-php",
+    "name": "euromail/euromail",
     "description": "Official PHP SDK for the euromail.dev transactional email API",
     "type": "library",
     "license": "MIT",
