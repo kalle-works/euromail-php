@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/kalle-works/euromail-php/compare/v1.1.0...v1.1.1) (2026-09-04)
+
+### Bug Fixes
+
+* **composer:** publish as euromail/euromail ([#6](https://github.com/kalle-works/euromail-php/issues/6)) ([a26e2b6](https://github.com/kalle-works/euromail-php/commit/a26e2b626f64ccc851b1ac0a589be10ccdc4d8a1))
+
 ## [1.1.0](https://github.com/kalle-works/euromail-php/compare/v1.0.0...v1.1.0) (2026-09-04)
 
 ### Features
