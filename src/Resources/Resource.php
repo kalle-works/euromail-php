@@ -3,6 +3,8 @@
 namespace EuroMail\Resources;
 
 use EuroMail\Client;
+use EuroMail\Exceptions\EuroMailException;
+use EuroMail\Paginator;
 
 /**
  * Shared plumbing for the resource classes hanging off {@see Client}: path
@@ -37,14 +39,22 @@ abstract class Resource
     }
 
     /**
+     * The record or list under `data`. A 2xx envelope without a `data` array
+     * is an error, not an empty result: returning `[]` would let a caller
+     * read a broken response as "nothing there".
+     *
      * @param array<string, mixed> $response
      * @return array<string, mixed>
      */
     protected function unwrap(array $response): array
     {
-        $data = $response['data'] ?? [];
+        $data = $response['data'] ?? null;
 
-        return is_array($data) ? $data : [];
+        if (!is_array($data)) {
+            throw new EuroMailException('Response envelope has no "data" object.');
+        }
+
+        return $data;
     }
 
     /**
@@ -53,12 +63,41 @@ abstract class Resource
      */
     protected function unwrapPage(array $response): array
     {
-        $data = $response['data'] ?? [];
         $pagination = $response['pagination'] ?? [];
 
         return [
-            'data' => is_array($data) ? array_values($data) : [],
+            'data' => array_values($this->unwrap($response)),
             'pagination' => is_array($pagination) ? $pagination : [],
         ];
+    }
+
+    /**
+     * For the two list endpoints that answer `{data, total}` instead of a
+     * pagination block.
+     *
+     * @param array<string, mixed> $response
+     * @return array{data: array<int, array<string, mixed>>, total: int}
+     */
+    protected function unwrapTotal(array $response): array
+    {
+        return [
+            'data' => array_values($this->unwrap($response)),
+            'total' => (int) ($response['total'] ?? 0),
+        ];
+    }
+
+    /**
+     * Walks every page of a list method. `$fetchPage` receives the filters
+     * with `page` set and returns the `{data, pagination}` envelope.
+     *
+     * @param callable(array<string, mixed>): array{data: array<int, mixed>, pagination: array<string, mixed>} $fetchPage
+     * @param array<string, mixed> $filters
+     * @return \Generator<int, mixed>
+     */
+    protected function paginate(callable $fetchPage, array $filters): \Generator
+    {
+        yield from Paginator::iterate(static function (int $page) use ($fetchPage, $filters): array {
+            return $fetchPage(['page' => $page] + $filters);
+        });
     }
 }

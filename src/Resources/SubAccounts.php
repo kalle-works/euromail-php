@@ -2,7 +2,6 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Paginator;
 
 final class SubAccounts extends Resource
 {
@@ -30,9 +29,7 @@ final class SubAccounts extends Resource
      */
     public function iterate(array $filters = []): \Generator
     {
-        yield from Paginator::iterate(function (int $page) use ($filters): array {
-            return $this->all(['page' => $page] + $filters);
-        });
+        yield from $this->paginate(fn (array $f): array => $this->all($f), $filters);
     }
 
     /**

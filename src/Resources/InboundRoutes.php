@@ -2,7 +2,6 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Paginator;
 
 final class InboundRoutes extends Resource
 {
@@ -30,9 +29,7 @@ final class InboundRoutes extends Resource
      */
     public function iterate(array $filters = []): \Generator
     {
-        yield from Paginator::iterate(function (int $page) use ($filters): array {
-            return $this->all(['page' => $page] + $filters);
-        });
+        yield from $this->paginate(fn (array $f): array => $this->all($f), $filters);
     }
 
     /**
@@ -44,6 +41,9 @@ final class InboundRoutes extends Resource
     }
 
     /**
+     * Full replacement, not a patch: `pattern`, `match_type`, `priority` and
+     * `is_active` are all required.
+     *
      * @param array<string, mixed> $params
      * @return array<string, mixed>
      */

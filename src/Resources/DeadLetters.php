@@ -14,16 +14,10 @@ final class DeadLetters extends Resource
      */
     public function all(?int $count = null): array
     {
-        $response = $this->client->request(
+        return $this->unwrapTotal($this->client->request(
             'GET',
             $this->path('/v1/dead-letters', $count === null ? [] : ['count' => $count])
-        );
-        $total = $response['total'] ?? 0;
-
-        return [
-            'data' => array_values($this->unwrap($response)),
-            'total' => is_int($total) ? $total : (int) $total,
-        ];
+        ));
     }
 
     /**

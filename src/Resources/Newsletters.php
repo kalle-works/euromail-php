@@ -23,21 +23,18 @@ final class Newsletters extends Resource
      */
     public function all(array $filters = []): array
     {
-        $response = $this->client->request('GET', $this->path('/v1/newsletters', $filters));
-        $total = $response['total'] ?? 0;
-
-        return [
-            'data' => array_values($this->unwrap($response)),
-            'total' => is_int($total) ? $total : (int) $total,
-        ];
+        return $this->unwrapTotal($this->client->request('GET', $this->path('/v1/newsletters', $filters)));
     }
 
     /**
+     * Returns the full response: the newsletter under `data` and, once it
+     * has left draft, its send `stats` next to it.
+     *
      * @return array<string, mixed>
      */
     public function get(string $id): array
     {
-        return $this->unwrap($this->client->request('GET', '/v1/newsletters/' . $this->segment($id)));
+        return $this->client->request('GET', '/v1/newsletters/' . $this->segment($id));
     }
 
     /**

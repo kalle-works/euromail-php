@@ -2,22 +2,21 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Paginator;
 
 final class Domains extends Resource
 {
     /**
-     * Register a sending domain. The returned record carries the DNS records
-     * (SPF, DKIM, DMARC) to publish before {@see verify()} can succeed.
+     * Register a sending domain. Returns the full response: the domain under
+     * `data`, carrying the DNS records (SPF, DKIM, DMARC) to publish before
+     * {@see verify()} can succeed, plus an optional `warnings` list. The
+     * sending subdomain is changed afterwards with
+     * {@see setSendingSubdomain()}.
      *
-     * @param array<string, mixed> $extra additional fields, e.g. `sending_subdomain`
      * @return array<string, mixed>
      */
-    public function create(string $domain, array $extra = []): array
+    public function create(string $domain): array
     {
-        $body = ['domain' => $domain] + $extra;
-
-        return $this->unwrap($this->client->request('POST', '/v1/domains', $body));
+        return $this->client->request('POST', '/v1/domains', ['domain' => $domain]);
     }
 
     /**
@@ -31,7 +30,7 @@ final class Domains extends Resource
      */
     public function all(array $filters = []): array
     {
-        return $this->unwrapPage($this->client->request('GET', $this->path('/v1/domains', $filters)))['data'];
+        return $this->page($filters)['data'];
     }
 
     /**
@@ -49,9 +48,7 @@ final class Domains extends Resource
      */
     public function iterate(array $filters = []): \Generator
     {
-        yield from Paginator::iterate(function (int $page) use ($filters): array {
-            return $this->page(['page' => $page] + $filters);
-        });
+        yield from $this->paginate(fn (array $f): array => $this->page($f), $filters);
     }
 
     /**

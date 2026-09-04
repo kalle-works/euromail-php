@@ -3,6 +3,7 @@
 namespace EuroMail\Tests;
 
 use EuroMail\Client;
+use EuroMail\Exceptions\TransportException;
 use EuroMail\Http\Response;
 use PHPUnit\Framework\TestCase;
 
@@ -58,11 +59,7 @@ final class ResourcesContractTest extends TestCase
         yield 'webhooks.update' => [fn (Client $c) => $c->webhooks->update($id, $params), 'PUT', "/v1/webhooks/$enc", $params];
         yield 'webhooks.test' => [fn (Client $c) => $c->webhooks->test($id), 'POST', "/v1/webhooks/$enc/test", null];
 
-        yield 'domains.create' => [fn (Client $c) => $c->domains->create('example.com'), 'POST', '/v1/domains', ['domain' => 'example.com']];
-        yield 'domains.create with extra' => [
-            fn (Client $c) => $c->domains->create('example.com', ['sending_subdomain' => 'mail']),
-            'POST', '/v1/domains', ['domain' => 'example.com', 'sending_subdomain' => 'mail'],
-        ];
+        yield 'domains.get' => [fn (Client $c) => $c->domains->get($id), 'GET', "/v1/domains/$enc", null];
         yield 'domains.verify' => [fn (Client $c) => $c->domains->verify($id), 'POST', "/v1/domains/$enc/verify", null];
         yield 'domains.setSendingSubdomain' => [
             fn (Client $c) => $c->domains->setSendingSubdomain($id, 'mail'),
@@ -88,7 +85,6 @@ final class ResourcesContractTest extends TestCase
         ];
 
         yield 'newsletters.create' => [fn (Client $c) => $c->newsletters->create($params), 'POST', '/v1/newsletters', $params];
-        yield 'newsletters.get' => [fn (Client $c) => $c->newsletters->get($id), 'GET', "/v1/newsletters/$enc", null];
         yield 'newsletters.update' => [fn (Client $c) => $c->newsletters->update($id, $params), 'PUT', "/v1/newsletters/$enc", $params];
         yield 'newsletters.send' => [fn (Client $c) => $c->newsletters->send($id), 'POST', "/v1/newsletters/$enc/send", null];
 
@@ -112,6 +108,7 @@ final class ResourcesContractTest extends TestCase
 
         yield 'apiKeys.create' => [fn (Client $c) => $c->apiKeys->create(['name' => 'ci', 'scopes' => ['emails:send']]), 'POST', '/v1/api-keys', ['name' => 'ci', 'scopes' => ['emails:send']]];
         yield 'operations.get' => [fn (Client $c) => $c->operations->get($id), 'GET', "/v1/operations/$enc", null];
+        yield 'account.export is JSON, not CSV' => [fn (Client $c) => $c->account->export(), 'GET', '/v1/account/export', null];
         yield 'emails.broadcast' => [
             fn (Client $c) => $c->emails->broadcast(['contact_list_id' => 'cl_1', 'from_address' => 'a@b.c']),
             'POST', '/v1/emails/broadcast', ['contact_list_id' => 'cl_1', 'from_address' => 'a@b.c'],
@@ -145,7 +142,6 @@ final class ResourcesContractTest extends TestCase
         $id = 'id/with space';
         $enc = rawurlencode($id);
 
-        yield 'account' => [fn (Client $c) => $c->account->delete(), '/v1/account'];
         yield 'templates' => [fn (Client $c) => $c->templates->delete($id), "/v1/templates/$enc"];
         yield 'webhooks' => [fn (Client $c) => $c->webhooks->delete($id), "/v1/webhooks/$enc"];
         yield 'domains' => [fn (Client $c) => $c->domains->delete($id), "/v1/domains/$enc"];
@@ -161,6 +157,70 @@ final class ResourcesContractTest extends TestCase
         yield 'subAccounts' => [fn (Client $c) => $c->subAccounts->delete($id), "/v1/accounts/$enc"];
         yield 'apiKeys' => [fn (Client $c) => $c->apiKeys->delete($id), "/v1/api-keys/$enc"];
         yield 'deadLetters' => [fn (Client $c) => $c->deadLetters->delete($id), "/v1/dead-letters/$enc"];
+    }
+
+    public function testAccountDeleteSendsTheConfirmationHeaderTheServerRequires(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(204, [], ''));
+        $client = new Client('sk_test', ['transport' => $transport]);
+
+        $client->account->delete();
+
+        $request = $transport->getLastRequest();
+        $this->assertNotNull($request);
+        $this->assertSame('DELETE', $request->method);
+        $this->assertSame('https://api.euromail.dev/v1/account', $request->url);
+        $this->assertSame('DELETE', $request->headers['X-Confirm-Delete'] ?? null);
+    }
+
+    /**
+     * The broadcast endpoint has no idempotency key, so a retry after a
+     * timeout could mail the whole list twice; the SDK must send it once.
+     */
+    public function testBroadcastIsNeverRetried(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueException(new TransportException('timeout'));
+        $transport->queueResponse(new Response(202, [], (string) json_encode(['data' => ['operation_id' => 'op_1']])));
+        $client = new Client('sk_test', ['transport' => $transport, 'max_retries' => 3, 'max_retry_delay' => 0]);
+
+        $this->expectException(TransportException::class);
+        try {
+            $client->emails->broadcast(['contact_list_id' => 'cl_1', 'from_address' => 'a@b.c']);
+        } finally {
+            $this->assertSame(1, $transport->getRequestCount());
+        }
+    }
+
+    /**
+     * @dataProvider addContactsRejectedProvider
+     * @param array<int, array<string, mixed>> $contacts
+     */
+    public function testAddContactsRejectsEmptyAndOversizedBatchesBeforeAnyRequest(array $contacts, string $message): void
+    {
+        $transport = new MockTransport();
+        $client = new Client('sk_test', ['transport' => $transport]);
+
+        try {
+            $client->contactLists->addContacts('l1', $contacts);
+            $this->fail('Expected InvalidArgumentException was not thrown.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString($message, $exception->getMessage());
+        }
+
+        $this->assertSame(0, $transport->getRequestCount());
+    }
+
+    /**
+     * @return array<string, array{array<int, array<string, mixed>>, string}>
+     */
+    public function addContactsRejectedProvider(): array
+    {
+        return [
+            'empty' => [[], 'empty'],
+            'one over the cap' => [array_fill(0, 1001, ['email' => 'a@example.com']), '1000'],
+        ];
     }
 
     /**
@@ -275,6 +335,8 @@ final class ResourcesContractTest extends TestCase
         yield 'analytics.tags' => [fn (Client $c) => $c->analytics->tags($q), 'GET', '/v1/analytics/tags?period=30d', null];
         yield 'analytics.aggregate' => [fn (Client $c) => $c->analytics->aggregate(), 'GET', '/v1/analytics/aggregate', null];
         yield 'subAccounts.analytics' => [fn (Client $c) => $c->subAccounts->analytics('id/with space', $q), 'GET', "/v1/accounts/$enc/analytics?period=30d", null];
+        yield 'domains.create' => [fn (Client $c) => $c->domains->create('example.com'), 'POST', '/v1/domains', ['domain' => 'example.com']];
+        yield 'newsletters.get' => [fn (Client $c) => $c->newsletters->get('id/with space'), 'GET', "/v1/newsletters/$enc", null];
         yield 'domains.setTrackingDomain' => [
             fn (Client $c) => $c->domains->setTrackingDomain('id/with space', 'click.example.com'),
             'PUT', "/v1/domains/$enc/tracking-domain", ['tracking_domain' => 'click.example.com'],
@@ -303,7 +365,6 @@ final class ResourcesContractTest extends TestCase
      */
     public function csvExportProvider(): iterable
     {
-        yield 'account.export' => [fn (Client $c) => $c->account->export(), '/v1/account/export'];
         yield 'analytics.export' => [fn (Client $c) => $c->analytics->export(['from' => '2026-08-01', 'to' => '2026-08-31']), '/v1/analytics/export?from=2026-08-01&to=2026-08-31'];
     }
 

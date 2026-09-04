@@ -15,6 +15,12 @@ final class StreamTransport implements TransportInterface
 
     public function send(Request $request): Response
     {
+        // $http_response_header, read below, is only populated by the http
+        // stream wrapper; refuse anything else instead of iterating null.
+        if (preg_match('#^https?://#i', $request->url) !== 1) {
+            throw new TransportException('Stream transport only supports http(s) URLs.');
+        }
+
         $headerLines = [];
         foreach ($request->headers as $name => $value) {
             $headerLines[] = $name . ': ' . $value;
@@ -49,9 +55,7 @@ final class StreamTransport implements TransportInterface
         // the status line and headers of EVERY hop concatenated in order. Only the
         // last hop describes the response actually returned here, so find the last
         // "HTTP/" status line and parse headers from that point on, discarding the
-        // earlier hops' headers (e.g. a redirect's Location header). The variable
-        // is always populated once an http(s) fetch has returned a body; Client
-        // rejects any other URL scheme up front.
+        // earlier hops' headers (e.g. a redirect's Location header).
         $lastStatusIndex = null;
         foreach ($http_response_header as $index => $line) {
             if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $matches)) {

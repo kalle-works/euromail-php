@@ -30,6 +30,7 @@ use EuroMail\Resources\Webhooks;
 final class Client
 {
     public const API_KEY_ENV = 'EUROMAIL_API_KEY';
+    public const DEFAULT_BASE_URL = 'https://api.euromail.dev';
 
     private string $apiKey;
     private string $baseUrl;
@@ -69,7 +70,7 @@ final class Client
     public function __construct(?string $apiKey = null, array $options = [])
     {
         $this->apiKey = self::resolveApiKey($apiKey);
-        $this->baseUrl = self::resolveBaseUrl($options['base_url'] ?? 'https://api.euromail.dev');
+        $this->baseUrl = self::resolveBaseUrl($options['base_url'] ?? null);
         $this->timeout = $options['timeout'] ?? 15;
         $this->maxRetries = $options['max_retries'] ?? 0;
         $this->maxRetryDelay = $options['max_retry_delay'] ?? 30;
@@ -107,20 +108,23 @@ final class Client
     }
 
     /**
-     * Only http(s) URLs make sense here: both transports speak HTTP, and the
+     * A null or blank base_url means the production API, so a cleared config
+     * field behaves like an absent one (SDK 1.x accepted any string). Only
+     * http(s) URLs make sense otherwise: both transports speak HTTP, and the
      * stream transport reads its response headers from a variable PHP only
      * populates for the http wrapper. A trailing slash is dropped so paths
      * can be appended verbatim.
      */
-    private static function resolveBaseUrl(string $baseUrl): string
+    private static function resolveBaseUrl(?string $baseUrl): string
     {
-        $baseUrl = rtrim($baseUrl, '/');
+        $baseUrl = rtrim(trim((string) $baseUrl), '/');
+
+        if ($baseUrl === '') {
+            return self::DEFAULT_BASE_URL;
+        }
 
         if (preg_match('#^https?://[^/]+#i', $baseUrl) !== 1) {
-            throw new \InvalidArgumentException(sprintf(
-                'The "base_url" option must be an http(s) URL, "%s" given.',
-                $baseUrl
-            ));
+            throw new \InvalidArgumentException('The "base_url" option must be an http(s) URL.');
         }
 
         return $baseUrl;
@@ -129,7 +133,10 @@ final class Client
     /**
      * An explicit key wins; otherwise the `EUROMAIL_API_KEY` environment
      * variable is used. A missing or blank key is rejected here rather than
-     * surfacing later as a 401 on the first request.
+     * surfacing later as a 401 on the first request. Surrounding whitespace
+     * is dropped and control characters are refused: a key read from a
+     * secret file with a trailing newline would otherwise end the
+     * Authorization header early and turn the rest into extra headers.
      */
     private static function resolveApiKey(?string $apiKey): string
     {
@@ -138,48 +145,64 @@ final class Client
             $apiKey = is_string($fromEnv) ? $fromEnv : null;
         }
 
-        if ($apiKey === null || trim($apiKey) === '') {
+        $apiKey = trim((string) $apiKey);
+
+        if ($apiKey === '') {
             throw new \InvalidArgumentException(sprintf(
                 'An API key is required. Pass it to the Client constructor or set the %s environment variable.',
                 self::API_KEY_ENV
             ));
         }
 
+        if (preg_match('/[\x00-\x1F\x7F]/', $apiKey) === 1) {
+            throw new \InvalidArgumentException('The API key contains control characters.');
+        }
+
         return $apiKey;
     }
 
     /**
+     * `$options` takes `headers` (extra request headers) and `retry`
+     * (default true). Pass `retry => false` for a request that is neither
+     * idempotent nor keyed: the retry loop re-sends on transport failures,
+     * and a timeout after the server already accepted such a request would
+     * otherwise perform it twice.
+     *
      * @param array<string, mixed>|null $body
+     * @param array{headers?: array<string, string>, retry?: bool} $options
      * @return array<string, mixed>
      */
-    public function request(string $method, string $path, ?array $body = null): array
+    public function request(string $method, string $path, ?array $body = null, array $options = []): array
     {
-        return $this->decodeBody($this->sendRequest($method, $path, $body), $method, $path);
+        return $this->decodeBody($this->sendRequest($method, $path, $body, $options), $method, $path);
     }
 
     /**
      * Like {@see request()}, but returns the raw response body instead of
-     * JSON-decoding it. Used for endpoints that don't respond with JSON, such
-     * as the suppressions CSV export.
+     * JSON-decoding it, for the CSV export endpoints (suppressions,
+     * analytics).
      *
      * @param array<string, mixed>|null $body
+     * @param array{headers?: array<string, string>, retry?: bool} $options
      */
-    public function requestRaw(string $method, string $path, ?array $body = null): string
+    public function requestRaw(string $method, string $path, ?array $body = null, array $options = []): string
     {
-        return $this->sendRequest($method, $path, $body)->body;
+        return $this->sendRequest($method, $path, $body, $options)->body;
     }
 
     /**
      * @param array<string, mixed>|null $body
+     * @param array{headers?: array<string, string>, retry?: bool} $options
      */
-    private function sendRequest(string $method, string $path, ?array $body): Response
+    private function sendRequest(string $method, string $path, ?array $body, array $options): Response
     {
         $url = $this->baseUrl . $path;
-        $headers = [
+        $headers = ($options['headers'] ?? []) + [
             'Authorization' => 'Bearer ' . $this->apiKey,
             'Content-Type' => 'application/json',
             'User-Agent' => 'euromail-php/' . Version::SDK_VERSION . ' PHP/' . PHP_VERSION,
         ];
+        $maxRetries = ($options['retry'] ?? true) ? $this->maxRetries : 0;
 
         $encodedBody = null;
         if ($body !== null) {
@@ -199,7 +222,7 @@ final class Client
             try {
                 $response = $this->transport->send($request);
             } catch (TransportException $exception) {
-                if ($attempt < $this->maxRetries) {
+                if ($attempt < $maxRetries) {
                     $this->waitBeforeRetry($attempt, null);
                     $attempt++;
                     continue;
@@ -213,7 +236,7 @@ final class Client
 
             $exception = EuroMailException::fromResponse($response);
 
-            if ($attempt < $this->maxRetries && $exception->isRetryable()) {
+            if ($attempt < $maxRetries && $exception->isRetryable()) {
                 $this->waitBeforeRetry($attempt, $exception->getRetryAfter());
                 $attempt++;
                 continue;
@@ -245,21 +268,23 @@ final class Client
     }
 
     /**
-     * An empty body (204, or a DELETE that returns nothing) decodes to an
-     * empty array. Anything else must be a JSON object: a 2xx whose body is
-     * not one (an HTML page from a proxy, a truncated response) is raised as
-     * an exception, because silently returning `[]` would let callers read
-     * missing fields as "no data" and treat a broken response as a success.
+     * An empty or whitespace-only body (204, or a DELETE that returns
+     * nothing) decodes to an empty array. Anything else must be a JSON
+     * object: a 2xx whose body is not one (an HTML page from a proxy, a
+     * truncated response) is raised as an exception, because silently
+     * returning `[]` would let callers read missing fields as "no data" and
+     * treat a broken response as a success.
      *
      * @return array<string, mixed>
      */
     private function decodeBody(Response $response, string $method, string $path): array
     {
-        if ($response->body === '') {
+        $body = trim($response->body);
+        if ($body === '') {
             return [];
         }
 
-        $decoded = json_decode($response->body, true);
+        $decoded = json_decode($body, true);
 
         if (!is_array($decoded)) {
             $reason = json_last_error() === JSON_ERROR_NONE

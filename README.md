@@ -3,10 +3,10 @@
 Official PHP SDK for the [euromail.dev](https://euromail.dev) transactional email API.
 
 Requires PHP 7.4 or newer. Zero runtime dependencies beyond `ext-json`.
-Covers the whole `/v1` API: emails, templates, domains, webhooks,
-suppressions, contact lists, newsletters, signup forms, inbound mail and
-routes, sub-accounts, API keys, analytics, audit logs, operations and dead
-letters.
+Covers emails, templates, domains, webhooks, suppressions, contact lists,
+newsletters, signup forms, inbound mail and routes, sub-accounts, API keys,
+analytics, audit logs, operations, dead letters and the account itself.
+Not yet wrapped: agent mailboxes, GDPR export/erase, billing and insights.
 
 ## Install
 
@@ -39,7 +39,9 @@ $client = new Client(); // reads EUROMAIL_API_KEY
 ```
 
 A missing or blank key throws `InvalidArgumentException` from the
-constructor rather than a 401 on the first request.
+constructor rather than a 401 on the first request. The key is trimmed, so
+a trailing newline from a secret file is harmless; a key with other control
+characters is rejected. A blank `base_url` means the production API.
 
 ### Client options
 
@@ -137,10 +139,15 @@ foreach ($client->contactLists->iterateContacts($listId) as $contact) {
 `limit` / `offset` and returns `['data' => [...], 'total' => n]`, mirroring
 that endpoint.
 
-Analytics methods, `domains->setTrackingDomain()`,
-`domains->verifyTrackingDomain()` and `emails->validate()` return the full
-response body, because those endpoints carry fields next to `data`
-(`period`, `cname_target`, `tracking_check`, `valid`).
+Analytics methods, `domains->create()`, `domains->setTrackingDomain()`,
+`domains->verifyTrackingDomain()`, `newsletters->get()` and
+`emails->validate()` return the full response body, because those endpoints
+carry fields next to `data` (`period`, `warnings`, `cname_target`,
+`tracking_check`, `stats`, `valid`).
+
+`emails->broadcast()` is never retried automatically: the endpoint has no
+idempotency key, so a retry after a timeout could mail the whole list twice.
+Check the returned `operation_id` with `operations->get()` before resending.
 
 ## Error handling
 

@@ -3,7 +3,6 @@
 namespace EuroMail\Resources;
 
 use EuroMail\Idempotency;
-use EuroMail\Paginator;
 use EuroMail\Types\EmailDetails;
 use EuroMail\Types\SentEmail;
 
@@ -37,7 +36,7 @@ final class Emails extends Resource
             ));
         }
 
-        $emails = array_map([$this, 'withIdempotencyKey'], $emails);
+        $emails = array_map([$this, 'withIdempotencyKey'], array_values($emails));
 
         $response = $this->client->request('POST', '/v1/emails/batch', ['emails' => $emails]);
 
@@ -61,12 +60,17 @@ final class Emails extends Resource
      * `contact_list_id`, `from_address` and either `subject` + `html_body` /
      * `text_body` or a `template_alias`.
      *
+     * The endpoint has no idempotency key, so this request is never retried
+     * automatically: a timeout after the server had accepted it would send
+     * the whole list a second copy. Check the returned `operation_id` (see
+     * {@see Operations::get()}) before deciding to resend.
+     *
      * @param array<string, mixed> $params
      * @return array<string, mixed>
      */
     public function broadcast(array $params): array
     {
-        return $this->unwrap($this->client->request('POST', '/v1/emails/broadcast', $params));
+        return $this->unwrap($this->client->request('POST', '/v1/emails/broadcast', $params, ['retry' => false]));
     }
 
     public function get(string $id): EmailDetails
@@ -99,9 +103,7 @@ final class Emails extends Resource
      */
     public function iterate(array $filters = []): \Generator
     {
-        yield from Paginator::iterate(function (int $page) use ($filters): array {
-            return $this->all(['page' => $page] + $filters);
-        });
+        yield from $this->paginate(fn (array $f): array => $this->all($f), $filters);
     }
 
     public function cancel(string $id): SentEmail

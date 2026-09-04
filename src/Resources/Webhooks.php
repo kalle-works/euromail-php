@@ -2,7 +2,6 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Paginator;
 
 /**
  * Webhook subscriptions. For verifying the signature on an incoming webhook
@@ -37,9 +36,7 @@ final class Webhooks extends Resource
      */
     public function iterate(array $filters = []): \Generator
     {
-        yield from Paginator::iterate(function (int $page) use ($filters): array {
-            return $this->all(['page' => $page] + $filters);
-        });
+        yield from $this->paginate(fn (array $f): array => $this->all($f), $filters);
     }
 
     /**
@@ -51,6 +48,9 @@ final class Webhooks extends Resource
     }
 
     /**
+     * Full replacement, not a patch: `url`, `events` and `is_active` are all
+     * required.
+     *
      * @param array<string, mixed> $params
      * @return array<string, mixed>
      */

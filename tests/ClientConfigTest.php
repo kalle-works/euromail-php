@@ -4,6 +4,7 @@ namespace EuroMail\Tests;
 
 use EuroMail\Client;
 use EuroMail\Exceptions\EuroMailException;
+use EuroMail\Exceptions\TransportException;
 use EuroMail\Http\Response;
 use PHPUnit\Framework\TestCase;
 
@@ -62,6 +63,24 @@ final class ClientConfigTest extends TestCase
         ];
     }
 
+    public function testApiKeyIsTrimmedBeforeUse(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(200, [], '{"data":{}}'));
+
+        $client = new Client("  sk_test\n", ['transport' => $transport]);
+        $client->account->get();
+
+        $this->assertSame('Bearer sk_test', $transport->getLastRequest()->headers['Authorization'] ?? null);
+    }
+
+    public function testApiKeyWithEmbeddedControlCharactersIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('control characters');
+        new Client("sk_test\r\nX-Injected: 1", ['transport' => new MockTransport()]);
+    }
+
     /**
      * @dataProvider badBaseUrlProvider
      */
@@ -80,7 +99,34 @@ final class ClientConfigTest extends TestCase
         return [
             'file scheme' => ['file:///etc'],
             'no scheme' => ['api.euromail.dev'],
+        ];
+    }
+
+    /**
+     * A cleared config field arrives as '' (the WordPress plugin does this);
+     * it must behave like an absent option, as it did in 1.x.
+     *
+     * @dataProvider blankBaseUrlProvider
+     */
+    public function testBlankBaseUrlMeansTheDefault(string $baseUrl): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(200, [], '{"data":{}}'));
+
+        $client = new Client('sk_test', ['base_url' => $baseUrl, 'transport' => $transport]);
+        $client->account->get();
+
+        $this->assertSame(Client::DEFAULT_BASE_URL . '/v1/account', $transport->getLastRequest()->url ?? null);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public function blankBaseUrlProvider(): array
+    {
+        return [
             'empty' => [''],
+            'whitespace' => ['  '],
         ];
     }
 
@@ -123,12 +169,84 @@ final class ClientConfigTest extends TestCase
         $client->account->get();
     }
 
-    public function testEmptyBodyDecodesToEmptyArray(): void
+    /**
+     * @dataProvider emptyBodyProvider
+     */
+    public function testEmptyOrWhitespaceBodyDecodesToEmptyArray(string $body): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(204, [], $body));
+        $client = new Client('sk_test', ['transport' => $transport]);
+
+        $this->assertSame([], $client->request('DELETE', '/v1/templates/t_1'));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public function emptyBodyProvider(): array
+    {
+        return [
+            'empty' => [''],
+            'newline' => ["\n"],
+            'crlf and spaces' => ["  \r\n"],
+        ];
+    }
+
+    /**
+     * @dataProvider envelopeWithoutDataProvider
+     */
+    public function testSuccessEnvelopeWithoutDataObjectIsAnErrorNotAnEmptyRecord(string $body): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(new Response(200, [], $body));
+        $client = new Client('sk_test', ['transport' => $transport]);
+
+        $this->expectException(EuroMailException::class);
+        $this->expectExceptionMessage('"data"');
+        $client->templates->get('t_1');
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public function envelopeWithoutDataProvider(): array
+    {
+        return [
+            'no data key' => ['{}'],
+            'data is null' => ['{"data":null}'],
+            'data is a string' => ['{"data":"oops"}'],
+        ];
+    }
+
+    public function testExtraRequestHeadersAreSentAlongsideTheDefaults(): void
     {
         $transport = new MockTransport();
         $transport->queueResponse(new Response(204, [], ''));
         $client = new Client('sk_test', ['transport' => $transport]);
 
-        $this->assertSame([], $client->request('DELETE', '/v1/account'));
+        $client->request('DELETE', '/v1/x', null, ['headers' => ['X-Confirm-Delete' => 'DELETE']]);
+
+        $headers = $transport->getLastRequest()->headers ?? [];
+        $this->assertSame('DELETE', $headers['X-Confirm-Delete'] ?? null);
+        $this->assertSame('Bearer sk_test', $headers['Authorization'] ?? null);
+    }
+
+    public function testRetryOptionFalseSendsExactlyOnceEvenWhenRetriesAreConfigured(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueException(new TransportException('timeout'));
+        $transport->queueResponse(new Response(200, [], '{"data":{}}'));
+        $client = new Client('sk_test', ['transport' => $transport, 'max_retries' => 2, 'max_retry_delay' => 0]);
+
+        try {
+            $client->request('POST', '/v1/x', ['a' => 1], ['retry' => false]);
+            $this->fail('Expected TransportException was not thrown.');
+        } catch (TransportException $exception) {
+            $this->assertSame(1, $transport->getRequestCount());
+        }
+
+        $client->request('POST', '/v1/x', ['a' => 1]);
+        $this->assertSame(2, $transport->getRequestCount(), 'the default still retries and consumes the queued success');
     }
 }

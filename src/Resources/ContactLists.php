@@ -2,12 +2,16 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Paginator;
 
 final class ContactLists extends Resource
 {
     /**
-     * @param array<string, mixed> $params `name`, optional `description` and `custom_fields`
+     * Mirrors the server-side cap on one contacts request.
+     */
+    private const MAX_CONTACTS_PER_REQUEST = 1000;
+
+    /**
+     * @param array<string, mixed> $params `name`, optional `description` and `double_opt_in`
      * @return array<string, mixed>
      */
     public function create(array $params): array
@@ -62,14 +66,26 @@ final class ContactLists extends Resource
     }
 
     /**
-     * Add many contacts in one request. Partial success is normal: the
-     * result reports each contact as created, skipped or invalid.
+     * Add up to 1000 contacts in one request. Validation is all-or-nothing:
+     * one invalid address fails the whole request with a
+     * ValidationException. Addresses already on the list are skipped, so
+     * the result is `{inserted, total_requested}`.
      *
      * @param array<int, array<string, mixed>> $contacts each `['email' => ..., 'metadata' => [...]]`
      * @return array<string, mixed>
      */
     public function addContacts(string $listId, array $contacts): array
     {
+        if ($contacts === []) {
+            throw new \InvalidArgumentException('contacts must not be empty.');
+        }
+        if (count($contacts) > self::MAX_CONTACTS_PER_REQUEST) {
+            throw new \InvalidArgumentException(sprintf(
+                'A contacts request cannot exceed the server-side limit of %d contacts.',
+                self::MAX_CONTACTS_PER_REQUEST
+            ));
+        }
+
         return $this->unwrap($this->client->request(
             'POST',
             $this->contactsPath($listId),
@@ -92,9 +108,7 @@ final class ContactLists extends Resource
      */
     public function iterateContacts(string $listId, array $filters = []): \Generator
     {
-        yield from Paginator::iterate(function (int $page) use ($listId, $filters): array {
-            return $this->contacts($listId, ['page' => $page] + $filters);
-        });
+        yield from $this->paginate(fn (array $f): array => $this->contacts($listId, $f), $filters);
     }
 
     public function removeContact(string $listId, string $email): void

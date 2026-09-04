@@ -5,6 +5,7 @@ namespace EuroMail\Tests;
 use EuroMail\Client;
 use EuroMail\Http\Response;
 use EuroMail\Paginator;
+use EuroMail\Types\SentEmail;
 use PHPUnit\Framework\TestCase;
 
 final class PaginatorTest extends TestCase
@@ -44,16 +45,72 @@ final class PaginatorTest extends TestCase
         $this->assertStringContainsString('per_page=2', $urls[2], 'caller filters survive on every page');
     }
 
-    public function testCallerSuppliedPageIsOverriddenSoIterationStartsFromOne(): void
+    /**
+     * Every iterate() entry point must start at page 1 (overriding a
+     * caller-supplied page), keep the other filters, and hit its own path.
+     *
+     * @dataProvider iterateProvider
+     * @param callable(Client): \Generator<int, mixed> $call
+     */
+    public function testEveryIterateStartsFromPageOneAndKeepsFilters(callable $call, string $expectedPath): void
     {
         $transport = new MockTransport();
-        $transport->queueResponse(self::page([['id' => 't1']], 1, 1));
+        $transport->queueResponse(self::page([['id' => 'x']], 1, 1));
         $client = new Client('sk_test', ['transport' => $transport]);
 
-        iterator_to_array($client->templates->iterate(['page' => 7]));
+        $items = iterator_to_array($call($client), false);
 
-        $this->assertStringContainsString('page=1', $transport->getLastRequest()->url ?? '');
-        $this->assertStringNotContainsString('page=7', $transport->getLastRequest()->url ?? '');
+        $this->assertCount(1, $items);
+        $url = $transport->getLastRequest()->url ?? '';
+        $this->assertStringStartsWith('https://api.euromail.dev' . $expectedPath . '?', $url);
+        $this->assertStringContainsString('page=1', $url);
+        $this->assertStringNotContainsString('page=7', $url);
+        $this->assertStringContainsString('per_page=5', $url);
+    }
+
+    /**
+     * @return iterable<string, array{callable(Client): \Generator<int, mixed>, string}>
+     */
+    public function iterateProvider(): iterable
+    {
+        $f = ['page' => 7, 'per_page' => 5];
+
+        yield 'emails' => [fn (Client $c) => $c->emails->iterate($f), '/v1/emails'];
+        yield 'templates' => [fn (Client $c) => $c->templates->iterate($f), '/v1/templates'];
+        yield 'domains' => [fn (Client $c) => $c->domains->iterate($f), '/v1/domains'];
+        yield 'webhooks' => [fn (Client $c) => $c->webhooks->iterate($f), '/v1/webhooks'];
+        yield 'suppressions' => [fn (Client $c) => $c->suppressions->iterate($f), '/v1/suppressions'];
+        yield 'contacts' => [fn (Client $c) => $c->contactLists->iterateContacts('l1', $f), '/v1/contact-lists/l1/contacts'];
+        yield 'inbound' => [fn (Client $c) => $c->inbound->iterate($f), '/v1/inbound'];
+        yield 'inboundRoutes' => [fn (Client $c) => $c->inboundRoutes->iterate($f), '/v1/inbound-routes'];
+        yield 'subAccounts' => [fn (Client $c) => $c->subAccounts->iterate($f), '/v1/accounts'];
+        yield 'auditLogs' => [fn (Client $c) => $c->auditLogs->iterate($f), '/v1/audit-logs'];
+        yield 'operations' => [fn (Client $c) => $c->operations->iterate($f), '/v1/operations'];
+    }
+
+    public function testEmailsIterateYieldsSentEmailObjects(): void
+    {
+        $transport = new MockTransport();
+        $transport->queueResponse(self::page([['id' => 'em_1', 'status' => 'queued']], 1, 1));
+        $client = new Client('sk_test', ['transport' => $transport]);
+
+        $items = iterator_to_array($client->emails->iterate(), false);
+
+        $this->assertContainsOnlyInstancesOf(SentEmail::class, $items);
+        $this->assertSame('em_1', $items[0]->id);
+    }
+
+    public function testStopsWhenTheServerEchoesADifferentPageThanRequested(): void
+    {
+        $calls = 0;
+        $items = iterator_to_array(Paginator::iterate(function (int $page) use (&$calls): array {
+            $calls++;
+            // A broken server that ignores ?page= and always serves page 1.
+            return ['data' => [['id' => 'same']], 'pagination' => ['page' => 1, 'total_pages' => 3]];
+        }), false);
+
+        $this->assertSame([['id' => 'same']], $items, 'the echoed page is yielded once, never duplicated');
+        $this->assertSame(2, $calls, 'page 2 is requested once, recognised as an echo, and dropped');
     }
 
     public function testStopsAfterOnePageWhenTheEnvelopeCarriesNoPagination(): void
