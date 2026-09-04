@@ -4,8 +4,14 @@ namespace EuroMail\Types;
 
 class EmailDetails extends SentEmail
 {
+    /** @var array<int, array<string, mixed>> */
     public array $events;
 
+    /**
+     * @param string[] $to
+     * @param array<int, array<string, mixed>> $events
+     * @param array<string, mixed> $raw
+     */
     public function __construct(
         ?string $id = null,
         ?string $messageId = null,
@@ -21,6 +27,9 @@ class EmailDetails extends SentEmail
         $this->events = $events;
     }
 
+    /**
+     * @param array<string, mixed> $data
+     */
     public static function fromArray(array $data): self
     {
         return new self(

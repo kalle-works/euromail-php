@@ -49,23 +49,23 @@ final class StreamTransport implements TransportInterface
         // the status line and headers of EVERY hop concatenated in order. Only the
         // last hop describes the response actually returned here, so find the last
         // "HTTP/" status line and parse headers from that point on, discarding the
-        // earlier hops' headers (e.g. a redirect's Location header).
-        if (isset($http_response_header) && is_array($http_response_header)) {
-            $lastStatusIndex = null;
-            foreach ($http_response_header as $index => $line) {
-                if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $matches)) {
-                    $statusCode = (int) $matches[1];
-                    $lastStatusIndex = $index;
-                }
+        // earlier hops' headers (e.g. a redirect's Location header). The variable
+        // is always populated once an http(s) fetch has returned a body; Client
+        // rejects any other URL scheme up front.
+        $lastStatusIndex = null;
+        foreach ($http_response_header as $index => $line) {
+            if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $matches)) {
+                $statusCode = (int) $matches[1];
+                $lastStatusIndex = $index;
             }
+        }
 
-            if ($lastStatusIndex !== null) {
-                $count = count($http_response_header);
-                for ($i = $lastStatusIndex + 1; $i < $count; $i++) {
-                    $parts = explode(':', $http_response_header[$i], 2);
-                    if (count($parts) === 2) {
-                        $responseHeaders[trim($parts[0])] = trim($parts[1]);
-                    }
+        if ($lastStatusIndex !== null) {
+            $count = count($http_response_header);
+            for ($i = $lastStatusIndex + 1; $i < $count; $i++) {
+                $parts = explode(':', $http_response_header[$i], 2);
+                if (count($parts) === 2) {
+                    $responseHeaders[trim($parts[0])] = trim($parts[1]);
                 }
             }
         }

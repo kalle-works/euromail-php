@@ -1,0 +1,7 @@
+parameters:
+    level: 8
+    paths:
+        - src
+    # Constructor options arrive from untyped user code; the runtime guards on
+    # them are real even where the docblock shape says they cannot fail.
+    treatPhpDocTypesAsCertain: false

@@ -3,12 +3,31 @@
     "description": "Official PHP SDK for the euromail.dev transactional email API",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "euromail",
+        "email",
+        "transactional",
+        "smtp",
+        "api",
+        "sdk",
+        "gdpr"
+    ],
+    "homepage": "https://euromail.dev",
+    "support": {
+        "docs": "https://euromail.dev/docs",
+        "issues": "https://github.com/kalle-works/euromail-php/issues",
+        "source": "https://github.com/kalle-works/euromail-php"
+    },
     "require": {
         "php": ">=7.4",
         "ext-json": "*"
     },
     "require-dev": {
+        "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "^9.6"
+    },
+    "suggest": {
+        "ext-curl": "Used for HTTP transport when available; falls back to PHP streams otherwise"
     },
     "autoload": {
         "psr-4": {
@@ -19,5 +38,18 @@
         "psr-4": {
             "EuroMail\\Tests\\": "tests/"
         }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "find src tests -name '*.php' -print0 | xargs -0 -n1 php -l",
+        "analyse": "phpstan analyse --no-progress",
+        "check": [
+            "@lint",
+            "@analyse",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true
     }
 }

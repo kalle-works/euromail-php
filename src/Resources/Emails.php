@@ -2,35 +2,39 @@
 
 namespace EuroMail\Resources;
 
-use EuroMail\Client;
 use EuroMail\Idempotency;
+use EuroMail\Paginator;
 use EuroMail\Types\EmailDetails;
 use EuroMail\Types\SentEmail;
 
-final class Emails
+final class Emails extends Resource
 {
-    private Client $client;
+    /**
+     * Mirrors the server-side cap on POST /v1/emails/batch.
+     */
+    private const MAX_BATCH_SIZE = 500;
 
-    public function __construct(Client $client)
-    {
-        $this->client = $client;
-    }
-
+    /**
+     * @param array<string, mixed> $params
+     */
     public function send(array $params): SentEmail
     {
         $params = $this->withIdempotencyKey($params);
 
-        $response = $this->client->request('POST', '/v1/emails', $params);
-
-        return SentEmail::fromArray($response['data'] ?? []);
+        return SentEmail::fromArray($this->unwrap($this->client->request('POST', '/v1/emails', $params)));
     }
 
+    /**
+     * @param array<int, array<string, mixed>> $emails
+     * @return array{operation_id: string|null, data: SentEmail[], errors: array<int, mixed>}
+     */
     public function sendBatch(array $emails): array
     {
-        if (count($emails) > 500) {
-            throw new \InvalidArgumentException(
-                'Batch size cannot exceed the server-side limit of 500 emails.'
-            );
+        if (count($emails) > self::MAX_BATCH_SIZE) {
+            throw new \InvalidArgumentException(sprintf(
+                'Batch size cannot exceed the server-side limit of %d emails.',
+                self::MAX_BATCH_SIZE
+            ));
         }
 
         $emails = array_map([$this, 'withIdempotencyKey'], $emails);
@@ -38,48 +42,93 @@ final class Emails
         $response = $this->client->request('POST', '/v1/emails/batch', ['emails' => $emails]);
 
         $results = [];
-        foreach ($response['data'] ?? [] as $item) {
-            $results[] = SentEmail::fromArray($item);
+        foreach ($this->unwrap($response) as $item) {
+            $results[] = SentEmail::fromArray(is_array($item) ? $item : []);
         }
 
+        $operationId = $response['operation_id'] ?? null;
+        $errors = $response['errors'] ?? [];
+
         return [
-            'operation_id' => $response['operation_id'] ?? null,
+            'operation_id' => is_string($operationId) ? $operationId : null,
             'data' => $results,
-            'errors' => $response['errors'] ?? [],
+            'errors' => is_array($errors) ? $errors : [],
         ];
+    }
+
+    /**
+     * Send one message to every subscribed contact on a list. `$params` takes
+     * `contact_list_id`, `from_address` and either `subject` + `html_body` /
+     * `text_body` or a `template_alias`.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    public function broadcast(array $params): array
+    {
+        return $this->unwrap($this->client->request('POST', '/v1/emails/broadcast', $params));
     }
 
     public function get(string $id): EmailDetails
     {
-        $response = $this->client->request('GET', '/v1/emails/' . rawurlencode($id));
-
-        return EmailDetails::fromArray($response['data'] ?? []);
+        return EmailDetails::fromArray($this->unwrap($this->client->request('GET', '/v1/emails/' . $this->segment($id))));
     }
 
+    /**
+     * @param array<string, mixed> $filters e.g. `['status' => 'delivered', 'page' => 2, 'per_page' => 50]`
+     * @return array{data: SentEmail[], pagination: array<string, mixed>}
+     */
     public function all(array $filters = []): array
     {
-        $query = http_build_query($filters);
-        $path = '/v1/emails' . ($query !== '' ? '?' . $query : '');
-
-        $response = $this->client->request('GET', $path);
-        $items = $response['data'] ?? [];
+        $page = $this->unwrapPage($this->client->request('GET', $this->path('/v1/emails', $filters)));
 
         $data = [];
-        foreach ($items as $item) {
+        foreach ($page['data'] as $item) {
             $data[] = SentEmail::fromArray($item);
         }
 
         return [
             'data' => $data,
-            'pagination' => $response['pagination'] ?? [],
+            'pagination' => $page['pagination'],
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @return \Generator<int, SentEmail>
+     */
+    public function iterate(array $filters = []): \Generator
+    {
+        yield from Paginator::iterate(function (int $page) use ($filters): array {
+            return $this->all(['page' => $page] + $filters);
+        });
     }
 
     public function cancel(string $id): SentEmail
     {
-        $response = $this->client->request('POST', '/v1/emails/' . rawurlencode($id) . '/cancel');
+        return SentEmail::fromArray($this->unwrap($this->client->request('POST', '/v1/emails/' . $this->segment($id) . '/cancel')));
+    }
 
-        return SentEmail::fromArray($response['data'] ?? []);
+    /**
+     * Per-link click statistics for an email (requires click tracking).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function links(string $id): array
+    {
+        return array_values($this->unwrap($this->client->request('GET', '/v1/emails/' . $this->segment($id) . '/links')));
+    }
+
+    /**
+     * Check an address for valid syntax, a real MX record, and disposable or
+     * role-based patterns. Returns the verdict as the API sends it, with
+     * `valid` as the headline field.
+     *
+     * @return array<string, mixed>
+     */
+    public function validate(string $email): array
+    {
+        return $this->client->request('POST', '/v1/validate', ['email' => $email]);
     }
 
     /**

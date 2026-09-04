@@ -15,6 +15,10 @@ final class CurlTransport implements TransportInterface
 
     public function send(Request $request): Response
     {
+        if ($request->method === '' || $request->url === '') {
+            throw new TransportException('A request needs both an HTTP method and a URL.');
+        }
+
         $ch = curl_init();
         if ($ch === false) {
             throw new TransportException('Failed to initialize cURL handle.');
