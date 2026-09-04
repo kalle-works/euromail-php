@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/kalle-works/euromail-php/compare/v1.1.1...v1.2.0) (2026-09-04)
+
+### Features
+
+* cover the whole /v1 API and add page iteration ([#7](https://github.com/kalle-works/euromail-php/issues/7)) ([61f41ee](https://github.com/kalle-works/euromail-php/commit/61f41ee76fffc952f61df24610a1778106c3a6a1))
+
 ## [1.1.1](https://github.com/kalle-works/euromail-php/compare/v1.1.0...v1.1.1) (2026-09-04)
 
 ### Bug Fixes
