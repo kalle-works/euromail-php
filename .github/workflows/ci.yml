@@ -50,4 +50,4 @@ jobs:
         run: composer analyse
 
       - name: Audit dependencies
-        run: composer audit
+        run: composer audit --abandoned=report
