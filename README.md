@@ -82,7 +82,7 @@ SDK update. Path segments are URL-encoded for you.
 | --- | --- |
 | `emails` | `send`, `sendBatch`, `broadcast`, `get`, `all`, `iterate`, `cancel`, `links`, `validate` |
 | `templates` | `create`, `all`, `iterate`, `get`, `update`, `delete` |
-| `domains` | `create`, `all`, `page`, `iterate`, `get`, `verify`, `delete`, `setSendingSubdomain`, `setTrackingDomain`, `verifyTrackingDomain`, `removeTrackingDomain` |
+| `domains` | `create`, `all`, `page`, `iterate`, `get`, `update`, `verify`, `delete`, `setSendingSubdomain`, `setTrackingDomain`, `verifyTrackingDomain`, `removeTrackingDomain` |
 | `webhooks` | `create`, `all`, `iterate`, `get`, `update`, `test`, `delete` |
 | `suppressions` | `create`, `all`, `iterate`, `delete`, `import`, `export` |
 | `contactLists` | `create`, `all`, `get`, `update`, `delete`, `addContact`, `addContacts`, `contacts`, `iterateContacts`, `removeContact`, `getWelcomeEmail`, `configureWelcomeEmail` |
@@ -102,6 +102,11 @@ SDK update. Path segments are URL-encoded for you.
 $domain = $client->domains->create('yourdomain.com');
 // publish $domain['dns_records'], then:
 $client->domains->verify($domain['id']);
+
+// Never send this domain's mail unencrypted: a message to a server without
+// TLS fails instead of going out in plain text. `false` turns it off again.
+$domain = $client->domains->update($domain['id'], ['require_tls' => true]);
+$domain['require_tls']; // true
 
 $template = $client->templates->create([
     'alias' => 'welcome',

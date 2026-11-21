@@ -60,6 +60,29 @@ final class Domains extends Resource
     }
 
     /**
+     * Change a domain's settings. Only the fields in `$params` are sent, and
+     * `false` counts as a value: `['require_tls' => false]` turns the setting
+     * off. With no fields nothing changes and the current domain is returned.
+     *
+     * `require_tls`: never deliver this domain's mail unencrypted. A message
+     * to a receiving server that offers no TLS then fails instead of going
+     * out in plain text. The returned domain carries the current
+     * `require_tls`. Needs the `domains:manage` scope.
+     *
+     * @param array{require_tls?: bool} $params
+     * @return array<string, mixed>
+     */
+    public function update(string $id, array $params): array
+    {
+        if ($params === []) {
+            // An empty PHP array would encode as the JSON list `[]`, not an object.
+            return $this->get($id);
+        }
+
+        return $this->unwrap($this->client->request('PATCH', '/v1/domains/' . $this->segment($id), $params));
+    }
+
+    /**
      * Check DNS and mark the domain verified once SPF/DKIM/DMARC are
      * published. Safe to call repeatedly while waiting for propagation.
      *
