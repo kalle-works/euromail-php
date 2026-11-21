@@ -1,3 +1,9 @@
+## [1.3.0](https://github.com/kalle-works/euromail-php/compare/v1.2.0...v1.3.0) (2026-11-21)
+
+### Features
+
+* add domains update with require_tls ([#10](https://github.com/kalle-works/euromail-php/issues/10)) ([210c76b](https://github.com/kalle-works/euromail-php/commit/210c76b92b528bacacac8b1c20877683a4341c7e))
+
 ## [1.2.0](https://github.com/kalle-works/euromail-php/compare/v1.1.1...v1.2.0) (2026-09-04)
 
 ### Features
