@@ -61,6 +61,10 @@ final class ResourcesContractTest extends TestCase
 
         yield 'domains.get' => [fn (Client $c) => $c->domains->get($id), 'GET', "/v1/domains/$enc", null];
         yield 'domains.verify' => [fn (Client $c) => $c->domains->verify($id), 'POST', "/v1/domains/$enc/verify", null];
+        yield 'domains.update' => [
+            fn (Client $c) => $c->domains->update($id, ['require_tls' => true]),
+            'PATCH', "/v1/domains/$enc", ['require_tls' => true],
+        ];
         yield 'domains.setSendingSubdomain' => [
             fn (Client $c) => $c->domains->setSendingSubdomain($id, 'mail'),
             'PUT', "/v1/domains/$enc/sending-subdomain", ['sending_subdomain' => 'mail'],
